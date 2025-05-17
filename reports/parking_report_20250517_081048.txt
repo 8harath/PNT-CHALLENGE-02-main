@@ -1,0 +1,9 @@
+Parking Lot Analysis Report
+Generated on: 2025-05-17 08:10:51
+
+Total Parking Spaces: 340
+Occupied Spaces: 0
+Available Spaces: 340
+Occupancy Rate: 0.0%
+
+Vehicle Distribution:
