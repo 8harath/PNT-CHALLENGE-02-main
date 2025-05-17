@@ -19,7 +19,9 @@ class EnhancedParkingDetector:
         self.temp_rectangles = []
         self.car_detector = CarDetector()
         self.load_parking_positions()
-        self.show_help = True  # Add help text visibility flag
+        self.show_help = True
+        self.history = []  # Add history for undo functionality
+        self.is_reset = False  # Add reset state flag
         
         # Add zoom functionality
         self.zoom_scale = 1.0
@@ -33,6 +35,7 @@ class EnhancedParkingDetector:
         self.last_mouse_pos = None
         
     def load_parking_positions(self):
+        
         try:
             with open('CarParkPos', 'rb') as f:
                 self.posList = pickle.load(f)
@@ -40,6 +43,8 @@ class EnhancedParkingDetector:
             self.posList = []
             
     def save_parking_positions(self):
+        # Save current state to history before saving
+        self.history.append(self.posList.copy())
         with open('CarParkPos', 'wb') as f:
             pickle.dump(self.posList, f)
 
@@ -49,31 +54,19 @@ class EnhancedParkingDetector:
         
         # Add numbered help text in the right corner
         help_text = [
-            "=== Space Selection ===",
-            "1. Left-click + Drag: Select spaces",
-            "2. Right-click: Remove space",
-            "3. C: Clear all spaces",
-            "4. E: Clear current selection",
+            "=== Available Shortcuts ===",
+            "1. R: Reset all selections",
+            "2. Z: Undo last selection",
+            "3. D: Detect & generate report",
+            "4. S: Save current layout",
             "",
-            "=== Detection & Reports ===",
-            "5. D: Detect & generate report",
-            "6. S: Save current layout",
-            "7. L: Load saved layout",
-            "",
-            "=== View Controls ===",
-            "8. Z: Zoom in",
-            "9. X: Zoom out",
-            "10. R: Reset zoom",
-            "11. Space: Toggle pan mode",
-            "12. Arrow keys: Pan view",
-            "",
-            "=== Other Controls ===",
-            "13. H: Toggle help text",
-            "14. Q: Quit program"
+            "=== Mouse Controls ===",
+            "• Left-click + Drag: Select spaces",
+            "• Right-click: Remove space"
         ]
         
         # Calculate starting position (right corner)
-        start_x = width - 350  # 350 pixels from right edge
+        start_x = width - 300  # 300 pixels from right edge
         y_offset = 30
         
         # Add text with background for better visibility
@@ -305,8 +298,8 @@ class EnhancedParkingDetector:
             bordered_img = np.zeros((window_height, window_width, 3), dtype=np.uint8)
             bordered_img[border_size:border_size+height, border_size:border_size+width] = img.copy()
             
-            # Only draw parking spaces if there are any
-            if self.posList:
+            # Only draw parking spaces if there are any and not in reset state
+            if self.posList and not self.is_reset:
                 for pos in self.posList:
                     x, y = pos
                     # Adjust coordinates for border
@@ -339,20 +332,21 @@ class EnhancedParkingDetector:
                         cv2.rectangle(bordered_img, (pos_x, pos_y), 
                                     (pos_x + self.width, pos_y + self.height), (0, 255, 0), 1)
             
-            # Add essential information
-            total_spaces = len(self.posList)
-            
-            # Only process image and show statistics if there are parking spaces
-            if total_spaces > 0:
-                processed_img = self.process_frame(img)
-                available_slots, occupied_slots = self.check_parking_space(processed_img, img)
-                empty_spaces = available_slots
+            # Add essential information only if not in reset state
+            if not self.is_reset:
+                total_spaces = len(self.posList)
                 
-                # Display statistics in the top-right corner
-                cvzone.putTextRect(bordered_img, f'Total Slots: {total_spaces}', 
-                                 (window_width - 250, 30), scale=2, thickness=3, offset=10, colorR=(0,200,0))
-                cvzone.putTextRect(bordered_img, f'Empty Slots: {empty_spaces}', 
-                                 (window_width - 250, 80), scale=2, thickness=3, offset=10, colorR=(0,200,0))
+                # Only process image and show statistics if there are parking spaces
+                if total_spaces > 0:
+                    processed_img = self.process_frame(img)
+                    available_slots, occupied_slots = self.check_parking_space(processed_img, img)
+                    empty_spaces = available_slots
+                    
+                    # Display statistics in the top-right corner
+                    cvzone.putTextRect(bordered_img, f'Total Slots: {total_spaces}', 
+                                     (window_width - 250, 30), scale=2, thickness=3, offset=10, colorR=(0,200,0))
+                    cvzone.putTextRect(bordered_img, f'Empty Slots: {empty_spaces}', 
+                                     (window_width - 250, 80), scale=2, thickness=3, offset=10, colorR=(0,200,0))
             
             # Show help text if enabled
             if self.show_help:
@@ -366,46 +360,39 @@ class EnhancedParkingDetector:
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-            elif key == ord('c'):
-                # Clear all parking spaces with visual feedback
+            elif key == ord('r'):
+                # Reset all selections and state
                 self.posList = []
+                self.history = []
                 self.save_parking_positions()
-                # Reset drawing state
                 self.drawing = False
                 self.start_point = None
                 self.end_point = None
-                # Show clear message
-                cvzone.putTextRect(bordered_img, "All spaces cleared!", 
+                self.is_reset = True  # Set reset state
+                
+                # Show reset message
+                cvzone.putTextRect(bordered_img, "All selections reset!", 
                                  (window_width//2 - 150, window_height - 50), 
                                  scale=3, thickness=3, offset=10, colorR=(0,255,0))
                 cv2.imshow("Parking Detection", bordered_img)
                 cv2.waitKey(1000)  # Show message for 1 second
-            elif key == ord('e'):
-                # Clear current selection
-                self.drawing = False
-                self.start_point = None
-                self.end_point = None
-                # Show clear selection message
-                cvzone.putTextRect(bordered_img, "Selection cleared!", 
-                                 (window_width//2 - 120, window_height - 50), 
-                                 scale=2, thickness=2, offset=10, colorR=(0,255,0))
-                cv2.imshow("Parking Detection", bordered_img)
-                cv2.waitKey(500)  # Show message for 0.5 seconds
-            elif key == ord('h'):
-                # Toggle help text
-                self.show_help = not self.show_help
+            elif key == ord('z'):
+                # Undo last selection
+                if self.history:
+                    self.posList = self.history.pop()
+                    self.save_parking_positions()
+                    self.is_reset = False  # Exit reset state
+                    # Show undo message
+                    cvzone.putTextRect(bordered_img, "Last selection undone!", 
+                                     (window_width//2 - 150, window_height - 50), 
+                                     scale=2, thickness=2, offset=10, colorR=(0,255,0))
+                    cv2.imshow("Parking Detection", bordered_img)
+                    cv2.waitKey(500)  # Show message for 0.5 seconds
             elif key == ord('s'):
                 # Save current layout
                 self.save_parking_positions()
+                self.is_reset = False  # Exit reset state
                 cvzone.putTextRect(bordered_img, "Layout Saved!", 
-                                 (window_width//2 - 100, window_height - 50), 
-                                 scale=2, thickness=2, offset=10, colorR=(0,255,0))
-                cv2.imshow("Parking Detection", bordered_img)
-                cv2.waitKey(1000)  # Show message for 1 second
-            elif key == ord('l'):
-                # Load saved layout
-                self.load_parking_positions()
-                cvzone.putTextRect(bordered_img, "Layout Loaded!", 
                                  (window_width//2 - 100, window_height - 50), 
                                  scale=2, thickness=2, offset=10, colorR=(0,255,0))
                 cv2.imshow("Parking Detection", bordered_img)
@@ -445,24 +432,6 @@ class EnhancedParkingDetector:
                                  scale=3, thickness=3, offset=10, colorR=(0,255,0))
                 cv2.imshow("Parking Detection", bordered_img)
                 cv2.waitKey(2000)  # Show message for 2 seconds
-            elif key == ord('z'):  # Zoom in
-                self.zoom_scale = min(self.max_zoom, self.zoom_scale + self.zoom_step)
-            elif key == ord('x'):  # Zoom out
-                self.zoom_scale = max(self.min_zoom, self.zoom_scale - self.zoom_step)
-            elif key == ord('r'):  # Reset zoom
-                self.zoom_scale = 1.0
-                self.pan_x = 0
-                self.pan_y = 0
-            elif key == ord(' '):  # Toggle pan mode
-                self.is_panning = not self.is_panning
-            elif key == 81:  # Left arrow
-                self.pan_x = max(0, self.pan_x - self.pan_step)
-            elif key == 83:  # Right arrow
-                self.pan_x += self.pan_step
-            elif key == 82:  # Up arrow
-                self.pan_y = max(0, self.pan_y - self.pan_step)
-            elif key == 84:  # Down arrow
-                self.pan_y += self.pan_step
         
         cv2.destroyAllWindows()
 
